@@ -19,9 +19,9 @@ fsPTC = (fw/200, fh/100)
 class DarkCurrentAnalysis:
     def __init__(self, window):
         self.window = window
-        self.window.title("Temporal Stability and Calibration")
+        self.window.title("Line Stability and Calibration")
         # self.window.config(background='#FFFFFF')
-        self.window.geometry(f"{fw+350}x{int(2*fh/3)+100}")
+        self.window.geometry(f"{fw+450}x{int(2*fh/3)+100}")
         self.window.resizable(True, True)
 
         self.filepath = ""
@@ -34,11 +34,13 @@ class DarkCurrentAnalysis:
         self.read_data = np.array([], dtype=np.float64)
         self.dark_data = np.array([], dtype=np.float64)
         self.frame_average = np.array([], dtype=np.float64)
-        self.variance_ij = np.array([], dtype=np.float64)
 
         self.Division_Column, self.Division_Row = IntVar(), IntVar()
         self.NIQR, self.NIteration = DoubleVar(), IntVar()
+        self.NIQR_S, self.NIteration_S = DoubleVar(), IntVar()
 
+        self.SpatialMask = FALSE
+        self.OutputFrame = FALSE
         self.Output = FALSE
 
         self.__main__()
@@ -73,10 +75,10 @@ class DarkCurrentAnalysis:
 
         Image_Size = [int(self.ImageSize_Row.get()), int(self.ImageSize_Col.get())]
 
-        fpath = WH.ButtonClickedEvent.Open_Path(self.filepath)
+        fpath = WH.ButtonClickedEvent.Open_File(self.filepath)
         self.Label3.configure(text=f"{fpath[-40:]}")
 
-        self.dark_data = WH.ButtonClickedEvent.Read_Folder(fpath, self.filepath[-3:], np.uint16, Image_Size)
+        self.dark_data = WH.ButtonClickedEvent.Read_File(fpath, fpath[-3:], np.uint16, Image_Size)
         self.InputData = self.InputData - self.dark_data
         self.frame_average = HF.DataProcessing.TemporalAverage(self.InputData)
         WH.Plotting.ShowImage(self.frame_average, self.ImageWidget)
@@ -90,7 +92,6 @@ class DarkCurrentAnalysis:
         Frame = WH.ButtonClickedEvent.Set_ROI(Frame, ROI1, ROI2)
         Frame = WH.ButtonClickedEvent.Set_FOI(Frame, FOI)
 
-        self.variance_ij = (HF.DataProcessing.TemporalNoise(Frame, Differential=False))**2
         self.ROI_Data = Frame
 
         if not hasattr(self, 'ROIWidget'):
@@ -103,55 +104,115 @@ class DarkCurrentAnalysis:
 
         WH.Plotting.DrawDivision(ax, Frame, row, col)
 
-    def Calculate(self, ax1, ax2, Frame, variance_ij, row, col):
+    def Calculate(self, ax1, ax2, Frame, row, col, Differential):
 
         self.Show_ROI(self.InputData.copy())
         self.ShowBlock(ax1, HF.DataProcessing.TemporalAverage(Frame), row, col)
 
+        variance_ij = (HF.DataProcessing.TemporalNoise(Frame, Differential=Differential))**2
         variance_ij = HF.DataProcessing.Array2Maskedarray(variance_ij)
         stddev_y = HF.DataProcessing.RMS_Division(np.sqrt(variance_ij), row, col)
 
         # Frame = HF.DataProcessing.Array2Maskedarray(Frame)
-        Average = HF.DataProcessing.SpatialAverage(Frame)
+        Average = HF.DataProcessing.LineMean(HF.DataProcessing.TemporalAverage(Frame), 'Row')
 
-        WH.Plotting.Show2DPlot(ax2, np.arange(Average.__len__()), Average,
-                               c='r', label=f'Raw ($\\mu$={int(np.mean(Average))} $\\sigma$={int(stddev_y[0])})',
+        WH.Plotting.Show2DPlot(ax2, np.arange(Average.shape[0]), Average,
+                               c='r', label=f'Raw ($\\mu$={int(np.mean(Average))} $\\sigma$={int(np.std(Average))})',
                                cla=True, xlabel='Frame Number $n^{th}$', ylabel='Pixel Value [DN]')
 
         self.Label8_2_1.configure(text=f"{np.format_float_scientific(np.mean(Average), unique=False, precision=2)}")
         self.Label8_2_2.configure(text=f"{np.format_float_scientific(np.sqrt(np.mean(variance_ij)), unique=False, precision=2)}")
         self.Output = Average[:, np.newaxis].copy()
+        self.OutputFrame = Frame.copy()
 
-    def Apply_IQR(self, Frame, variance_ij, NIQR, NIteration, ax1, ax2, row, col):
+    def Apply_IQR(self, Frame, NIQR, NIteration, ax1, ax2, row, col, Differential):
 
-        MaskedImage = WH.ButtonClickedEvent.IQR(HF.DataProcessing.TemporalAverage(Frame), NIQR, NIteration, False)
-        WH.Plotting.ShowImage(MaskedImage, ax1)
-        self.ShowBlock(ax1, MaskedImage.copy(), row, col)
-        WH.ButtonClickedEvent.Average(ax1, MaskedImage.copy(), row, col)
+        # MaskedImage = WH.ButtonClickedEvent.IQR(HF.DataProcessing.TemporalAverage(Frame), NIQR, NIteration, False)
+        MaskedImage = WH.ButtonClickedEvent.IQR(Frame, NIQR, NIteration, False)
 
-        variance_ij = HF.DataProcessing.Array2Maskedarray(variance_ij)
-        variance_ij.mask = MaskedImage.mask
+        # Temporal Average for 2D Plot
+        TemporalAverage = HF.DataProcessing.TemporalAverage(MaskedImage)
+        WH.Plotting.ShowImage(TemporalAverage, ax1)
+        self.ShowBlock(ax1, TemporalAverage.copy(), row, col)
+        WH.ButtonClickedEvent.Average(ax1, TemporalAverage.copy(), row, col)
+
+        # variance_ij = HF.DataProcessing.Array2Maskedarray(variance_ij)
+        # variance_ij.mask = MaskedImage.mask
+
+        Average = HF.DataProcessing.LineMean(TemporalAverage, 'Row')
+
+        variance_ij = (HF.DataProcessing.TemporalNoise(MaskedImage, Differential=Differential))**2
         stddev_y = HF.DataProcessing.RMS_Division(np.sqrt(variance_ij), row, col)
 
-        Frame = HF.DataProcessing.Array2Maskedarray(Frame)
-        Frame.mask = MaskedImage.mask
-        Average = HF.DataProcessing.SpatialAverage(Frame)
-
-        WH.Plotting.Show2DPlot(ax2, np.arange(Average.__len__()), Average,
-                               c='b', label=f'IQR ($\\mu$={int(np.mean(Average))} $\\sigma$={int(stddev_y[0])})',
+        WH.Plotting.Show2DPlot(ax2, np.arange(Average.shape[0]), Average,
+                               c='b', label=f'IQR ($\\mu$={int(np.mean(Average))} $\\sigma$={int(np.std(Average))})',
                                cla=False)
 
-        self.Label10_2_1.configure(text=f"{np.format_float_scientific(np.mean(Average), unique=False, precision=2)}")
-        self.Label10_2_2.configure(text=f"{np.format_float_scientific(np.sqrt(np.mean(variance_ij)), unique=False, precision=2)}")
+        self.Label9_3_2.configure(text=f"{np.format_float_scientific(np.mean(Average), unique=False, precision=2)}")
+        self.Label9_4_2.configure(text=f"{np.format_float_scientific(np.sqrt(np.mean(variance_ij)), unique=False, precision=2)}")
 
+        self.SpatialMask = MaskedImage.mask
         self.Output = np.append(self.Output, Average[:, np.newaxis].copy(), axis=1)
+        self.OutputFrame = MaskedImage.data.copy()
 
-    def SaveBTNEvent(self, data):
+    def Stability_Calibration(self, Frame, SpatialMask, NIQR, NIteration, ax1, ax2, row, col, FittingCurve, Differential):
+        pady = Frame.shape[-2]
+        MaskedImage = HF.DataProcessing.Array2Maskedarray(Frame)
+        MaskedImage.mask = SpatialMask.copy()
 
-        WH.ButtonClickedEvent.Save_csv(self.filepath, data)
+        Average = (HF.DataProcessing.LineMean(MaskedImage, 'Row'))
+
+        FittingCurve = 'Constant'
+        k = 0
+        for k in range(NIteration):
+            x = np.arange(Average.size)
+
+            if FittingCurve == 'Constant':
+                popt = HF.DataProcessing.CurveFit(FittingCurve, x, Average)
+                y = popt
+                calFactor = -y + np.mean(y)
+
+            MaskedImage = MaskedImage + np.repeat(calFactor[:, :, np.newaxis], Frame.shape[-1], axis=2)
+
+            MaskedImage.mask = SpatialMask
+            Average = (HF.DataProcessing.LineMean(MaskedImage, 'Row')).data
+
+        Average = (HF.DataProcessing.LineMean(MaskedImage, 'Row')).mean(axis=0)
+        # Average = HF.DataProcessing.LineMean(HF.DataProcessing.TemporalAverage(MaskedImage), 'Row') // Mask Error Occured
+
+        x = np.arange(Average.shape[0])
+        variance_ij = (HF.DataProcessing.TemporalNoise(MaskedImage, Differential=Differential))**2
+        stddev_y = HF.DataProcessing.RMS_Division(np.sqrt(variance_ij), row, col)
+
+        TemporalAverage = HF.DataProcessing.TemporalAverage(MaskedImage)
+        WH.Plotting.ShowImage(TemporalAverage, ax1)
+        self.ShowBlock(ax1, TemporalAverage.copy(), row, col)
+        WH.ButtonClickedEvent.Average(ax1, TemporalAverage.copy(), row, col)
+        WH.Plotting.Show2DPlot(ax2, x, Average, c='g', label=f'Cal({k+1}) ($\\mu$={int(np.mean(Average))} $\\sigma$={int(np.std(Average))})',
+                           cla=False)
+
+        self.Label10_3_2.configure(text=f"{np.format_float_scientific(np.mean(Average), unique=False, precision=2)}")
+        self.Label10_4_2.configure(text=f"{np.format_float_scientific(np.sqrt(np.mean(variance_ij)), unique=False, precision=2)}")
+
+        Average = np.pad(Average.data, (0, int(pady - Average.shape[0])), 'constant')
+        self.Output = np.append(self.Output, Average[:, np.newaxis].copy(), axis=1)
+        self.OutputFrame = MaskedImage.data.copy()
+
+    def SaveBTNEvent(self, fp, dtype, data):
+
+        WH.ButtonClickedEvent.Save_Files(fp, dtype, data)
 
     def SaveClipboardBTNEvent(self, data):
-        df = pd.DataFrame(data, columns=['mean', 'IQR'])
+
+        if data.shape[1] == 1:
+            df = pd.DataFrame(data, columns=['Raw'])
+        elif data.shape[1] == 2:
+            df = pd.DataFrame(data, columns=['Raw', 'IQR'])
+        elif data.shape[1] == 3:
+            df = pd.DataFrame(data, columns=['Raw', 'IQR', 'Cal'])
+        else:
+            df = pd.DataFrame(data)
+
         WH.ButtonClickedEvent.SaveClipboard(df)
 
     def __main__(self):
@@ -288,7 +349,12 @@ class DarkCurrentAnalysis:
 
         Entry8Span = 2
         self.Button8 = tkinter.Button(self.InputinfoFrame, text='Calculate',
-                                      command=lambda: self.Calculate(self.ImageWidget, self.ROIWidget, self.ROI_Data.copy(), self.variance_ij.copy(), int(self.Division_Row.get()), int(self.Division_Column.get())))
+                                      command=lambda: self.Calculate(self.ImageWidget,
+                                                                     self.ROIWidget,
+                                                                     self.ROI_Data.copy(),
+                                                                     int(self.Division_Row.get()),
+                                                                     int(self.Division_Column.get()),
+                                                                     self.OffsetCalibration.get()))
         self.Button8.grid(column=col, row=2, columnspan=Entry8Span)
 
         self.Label8_1_1 = tkinter.Label(self.InputinfoFrame, text='Mean')
@@ -302,14 +368,14 @@ class DarkCurrentAnalysis:
         col = col + Entry8Span
 
         Entry9Span = 2
-        self.Button9 = tkinter.Button(self.InputinfoFrame, text='Apply IQR', command=lambda: self.Apply_IQR(self.ROI_Data.copy(),
-                                                                                                            self.variance_ij.copy(),
+        self.Button9 = tkinter.Button(self.InputinfoFrame, text='Spatial IQR', command=lambda: self.Apply_IQR(self.ROI_Data.copy(),
                                                                                                             self.NIQR.get(),
                                                                                                             self.NIteration.get(),
                                                                                                             self.ImageWidget,
                                                                                                             self.ROIWidget,
                                                                                                             int(self.Division_Row.get()),
-                                                                                                            int(self.Division_Column.get())))
+                                                                                                            int(self.Division_Column.get()),
+                                                                                                            self.OffsetCalibration.get()))
         self.Button9.grid(column=col, row=2, columnspan=Entry9Span)
         self.Label9_1_1 = tkinter.Label(self.InputinfoFrame, text='IQR')
         self.Label9_1_1.grid(column=col, row=3)
@@ -320,23 +386,61 @@ class DarkCurrentAnalysis:
         self.Entry9_1_2.grid(column=col + 1, row=3)
         self.Entry9_2_2 = tkinter.Entry(self.InputinfoFrame, width=4, textvariable=self.NIteration, relief="ridge")
         self.Entry9_2_2.grid(column=col + 1, row=4)
+
+        self.Label9_3_1 = tkinter.Label(self.InputinfoFrame, text='Mean')
+        self.Label9_3_1.grid(column=col, row=5)
+        self.Label9_4_1 = tkinter.Label(self.InputinfoFrame, text='stddev')
+        self.Label9_4_1.grid(column=col, row=6)
+        self.Label9_3_2 = tkinter.Label(self.InputinfoFrame)
+        self.Label9_3_2.grid(column=col+1, row=5)
+        self.Label9_4_2 = tkinter.Label(self.InputinfoFrame)
+        self.Label9_4_2.grid(column=col+1, row=6)
         col = col + Entry9Span
 
         Entry10Span = 2
-        self.Button10 = tkinter.Button(self.InputinfoFrame, text='Save Clipboard',
-                                        command=lambda: self.SaveClipboardBTNEvent(self.Output))
-        self.Button10.grid(column=col, row=2, columnspan=Entry10Span)
+        self.Button10 = tkinter.Button(self.InputinfoFrame, text='Stability \n Calibration',
+                                      command=lambda: self.Stability_Calibration(self.ROI_Data.copy(),
+                                                                                 self.SpatialMask.copy(),
+                                                                                 self.NIQR_S.get(),
+                                                                                 self.NIteration_S.get(),
+                                                                                 self.ImageWidget,
+                                                                                 self.ROIWidget,
+                                                                                 int(self.Division_Row.get()),
+                                                                                 int(self.Division_Column.get()),
+                                                                                 'Constant',
+                                                                                 self.OffsetCalibration.get()))
 
-        self.Label10_1_1 = tkinter.Label(self.InputinfoFrame, text='Mean')
+        self.Button10.grid(column=col, row=2, columnspan=Entry10Span)
+        self.Label10_1_1 = tkinter.Label(self.InputinfoFrame, text='IQR')
         self.Label10_1_1.grid(column=col, row=3)
-        self.Label10_1_2 = tkinter.Label(self.InputinfoFrame, text='stddev')
-        self.Label10_1_2.grid(column=col, row=4)
-        self.Label10_2_1 = tkinter.Label(self.InputinfoFrame)
-        self.Label10_2_1.grid(column=col+1, row=3)
-        self.Label10_2_2 = tkinter.Label(self.InputinfoFrame)
-        self.Label10_2_2.grid(column=col+1, row=4)
+        self.Label10_2_1 = tkinter.Label(self.InputinfoFrame, text='Iterations')
+        self.Label10_2_1.grid(column=col, row=4)
+
+        self.Entry10_1_2 = tkinter.Entry(self.InputinfoFrame, width=4, textvariable=self.NIQR_S, relief="ridge")
+        self.Entry10_1_2.grid(column=col + 1, row=3)
+        self.Entry10_2_2 = tkinter.Entry(self.InputinfoFrame, width=4, textvariable=self.NIteration_S, relief="ridge")
+        self.Entry10_2_2.grid(column=col + 1, row=4)
+
+        self.Label10_3_1 = tkinter.Label(self.InputinfoFrame, text='Mean')
+        self.Label10_3_1.grid(column=col, row=5)
+        self.Label10_4_1 = tkinter.Label(self.InputinfoFrame, text='stddev')
+        self.Label10_4_1.grid(column=col, row=6)
+        self.Label10_3_2 = tkinter.Label(self.InputinfoFrame)
+        self.Label10_3_2.grid(column=col + 1, row=5)
+        self.Label10_4_2 = tkinter.Label(self.InputinfoFrame)
+        self.Label10_4_2.grid(column=col + 1, row=6)
 
         col = col + Entry10Span
+
+        Entry11Span = 1
+        self.Button11_1 = tkinter.Button(self.InputinfoFrame, text='Save Clipboard',
+                                        command=lambda: self.SaveClipboardBTNEvent(self.Output))
+        self.Button11_1.grid(column=col, row=2, columnspan=Entry11Span)
+
+        self.Button11_2 = tkinter.Button(self.InputinfoFrame, text='Save Image',
+                                        command=lambda: self.SaveBTNEvent(self.filepath, np.uint16, self.OutputFrame))
+        self.Button11_2.grid(column=col, row=3, columnspan=Entry11Span)
+        col = col + Entry11Span
 
 
 if __name__ == '__main__':

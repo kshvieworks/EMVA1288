@@ -27,7 +27,9 @@ class Plotting:
     def ShowImage(imageinfo, ax) -> None:
         ax.cla()
         ax.imshow(imageinfo, cmap="gray", vmin=max(0, np.mean(imageinfo) - 3*np.std(imageinfo)), vmax=np.mean(imageinfo) + 3*np.std(imageinfo), origin='lower')
+        # ax.imshow(imageinfo, cmap="gray", vmin=35300, vmax=42700, origin='lower')
         plt.pause(0.1)
+        plt.ion()
 
     @staticmethod
     def Show2DPlot(ax, x, y, c='r', label=None, cla = True, xlabel='', ylabel='') -> None:
@@ -42,6 +44,8 @@ class Plotting:
         ax.grid(True)
         ax.legend(loc='best')
         Plotting.forceAspect(ax, 1)
+        plt.pause(0.1)
+        plt.ion()
 
     @staticmethod
     def DrawDivision(ax, imageInfo, numRow, numCol) -> None:
@@ -113,17 +117,20 @@ class ButtonClickedEvent:
 
         for file_now in onlyfiles:
             if file_now[-3:] == fileformat:
+                try:
+                    fid = open(f"{filepath}/{file_now}", "rb")
+                    read_data_now = np.fromfile(fid, dtype=filedtype, sep="")
+                    read_data_now = read_data_now.reshape(ImageSize)
+                    fid.close()
 
-                fid = open(f"{filepath}/{file_now}", "rb")
-                read_data_now = np.fromfile(fid, dtype=filedtype, sep="")
-                read_data_now = read_data_now.reshape(ImageSize)
-                fid.close()
+                    if not read_data.any():
+                        read_data = read_data_now[np.newaxis, :]
+                        continue
 
-                if not read_data.any():
-                    read_data = read_data_now[np.newaxis, :]
-                    continue
+                    read_data = np.append(read_data, read_data_now[np.newaxis, :], axis=0)
 
-                read_data = np.append(read_data, read_data_now[np.newaxis, :], axis=0)
+                except ValueError:
+                    print(f'{file_now} Skipped')
 
         return np.array(read_data, dtype=np.float64)
 
@@ -161,6 +168,18 @@ class ButtonClickedEvent:
                 f.close()
         elif filepath[-4:] == "tiff":
             imageio.imwrite(filepath, data.astype(filedtype))
+
+    @staticmethod
+    def Save_Files(filepath, filedtype, data):
+
+        filepath = ButtonClickedEvent.Open_Path(filepath)
+
+        for k, d in enumerate(data):
+            fname = filepath + f"/IMG{k:04} + W{data.shape[1]}xH{data.shape[2]} {filedtype.__name__}.raw"
+
+            with open(fname, 'wb') as f:
+                f.write((d.astype(filedtype)).tobytes())
+                f.close()
 
     @staticmethod
     def Save_csv(filepath, data):
@@ -249,6 +268,19 @@ class ButtonClickedEvent:
                 "ColLineNoise" : ColLineNoise, "PixelNoise" : PixelNoise, "ImageInfo": imageinfo}
 
     @staticmethod
+    def Calculate_TemporalNoise(imageinfo, Differential = True):
+        if Differential:
+            imageinfo = HF.DataProcessing.DifferentialImage(imageinfo)
+        FrameNoise = HF.DataProcessing.FrameNoise(data = imageinfo, Differential = Differential)
+        TotalNoise = HF.DataProcessing.RMS(HF.DataProcessing.TemporalNoise(data = imageinfo, Differential = Differential))
+        RowLineNoise = HF.DataProcessing.LineNoise(data = imageinfo, Differential = Differential, Orientation = 'Row')
+        ColLineNoise = HF.DataProcessing.LineNoise(data = imageinfo, Differential = Differential, Orientation = 'Col')
+        LineNoise = np.sqrt(np.square(RowLineNoise) + np.square(ColLineNoise))
+        # PixelNoise = HF.DataProcessing.PixelNoise(TotalNoise, FrameNoise, LineNoise)
+        return {"TotalNoise" : TotalNoise, "FrameNoise" : FrameNoise, "RowLineNoise" : RowLineNoise,
+                "ColLineNoise" : ColLineNoise, "PixelNoise" : 'None', "ImageInfo": imageinfo}
+
+    @staticmethod
     def Apply_IQR_DSNU(imageinfo, NIQR, NIteration, Differential = True, ExcludingZero = True, HPF = True):
         if Differential:
             imageinfo = HF.DataProcessing.DifferentialImage(imageinfo)
@@ -275,7 +307,41 @@ class ButtonClickedEvent:
         LineNoise = np.sqrt(np.square(RowLineNoise) + np.square(ColLineNoise))
         PixelNoise = HF.DataProcessing.PixelNoise(TotalNoise, FrameNoise, LineNoise)
         return {"TotalNoise" : TotalNoise, "FrameNoise" : FrameNoise, "RowLineNoise" : RowLineNoise,
-                "ColLineNoise" : ColLineNoise, "PixelNoise" : PixelNoise, "ImageInfo" : imageinfo, "Mask": Mask}
+                "ColLineNoise" : ColLineNoise, "PixelNoise" : PixelNoise, "ImageInfo" : MaskedImage.data.copy(), "Mask": Mask}
+
+    @staticmethod
+    def Apply_IQR_TemporalNoise(imageinfo, NIQR, NIteration, Differential = True, ExcludingZero = True, HPF = True):
+        if Differential:
+            imageinfo = HF.DataProcessing.DifferentialImage(imageinfo)
+
+        if HPF:
+            imageinfo = HF.DataProcessing.Highpass_Filter(imageinfo)
+
+        Mask = (imageinfo.copy()).astype(bool)
+        Mask.fill(True)
+
+        if ExcludingZero:
+            Mask = (imageinfo!=0)
+
+        for k in range(NIteration):
+            MaskedArray = np.ma.masked_array(imageinfo, mask=~Mask)[np.ma.masked_array(imageinfo, mask=~Mask).mask==False].data
+            Mask = Mask * HF.DataProcessing.IQR_Mask(imageinfo = imageinfo, MaskedArray = MaskedArray, NIQR = NIQR)
+
+        MaskedImage = np.ma.masked_array(data=imageinfo, mask=~Mask)
+
+        FrameNoise = HF.DataProcessing.FrameNoise(data = MaskedImage, Differential = Differential)
+        TotalNoise = HF.DataProcessing.RMS(HF.DataProcessing.TemporalNoise(data = MaskedImage, Differential = Differential))
+
+        if Differential == False:
+            TemporalNoise_Temp = HF.DataProcessing.TemporalNoise(data=MaskedImage, Differential=Differential)
+            TemporalNoise = ButtonClickedEvent.IQR(TemporalNoise_Temp, NIQR, NIteration, ExcludingZero)
+            TotalNoise = HF.DataProcessing.RMS(TemporalNoise)
+
+        RowLineNoise = HF.DataProcessing.LineNoise(data = MaskedImage, Differential = Differential, Orientation = 'Row')
+        ColLineNoise = HF.DataProcessing.LineNoise(data = MaskedImage, Differential = Differential, Orientation = 'Col')
+        LineNoise = np.sqrt(np.square(RowLineNoise) + np.square(ColLineNoise))
+        return {"TotalNoise" : TotalNoise, "FrameNoise" : FrameNoise, "RowLineNoise" : RowLineNoise,
+                "ColLineNoise" : ColLineNoise, "PixelNoise" : 'None', "ImageInfo" : MaskedImage.data.copy(), "Mask": Mask}
 
     @staticmethod
     def IQR(imageinfo, NIQR, NIteration, ExcludingZero = True):

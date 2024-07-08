@@ -10,8 +10,9 @@ from os.path import isfile, join
 import tkinter
 from tkinter import *
 from scipy.ndimage import convolve, uniform_filter
-
-
+from scipy.optimize import curve_fit
+from scipy import stats
+from scipy.ndimage import uniform_filter1d
 
 class DataProcessing:
     @staticmethod
@@ -158,9 +159,48 @@ class DataProcessing:
 
     @staticmethod
     def LineMean(data, Orientation):
-        return np.mean(data, axis=1) if Orientation == 'Row' else np.mean(data, axis=0)
+        return np.mean(data, axis=data.ndim-1) if Orientation == 'Row' else np.mean(data, axis=data.ndim-2)
     @staticmethod
     def LineCalibration(data, Orientation='Row'):
         return data + data.mean() - (DataProcessing.LineMean(data, Orientation))[:, None]
+
+    @staticmethod
+    def CurveFit(f, x, y, guess = 5, maxfev=10000):
+        popt = None
+
+        if f == 'Exponential':
+            popt, _ = curve_fit(ModelingFunction.ExponentialCurve, x, y, guess, maxfev=maxfev)
+
+        if f == 'Linear':
+            popt = stats.linregress(x, y)[:2]
+
+        if f == 'RollingAverage':
+            if np.mean(y[:3]) <= np.mean(y[-3:]):
+                y_sum = np.cumsum(y)
+                n = guess
+                popt = np.array([(y_sum[k] - y_sum[k-n])/n if k >= n else y_sum[k]/(k+1) for k in range(y.__len__())])
+            else:
+                y_sum = np.cumsum(np.flip(y))
+                n = guess
+                popt = np.array(
+                    [(y_sum[k] - y_sum[k - n]) / n if k >= n else y_sum[k] / (k + 1) for k in range(y.__len__())])
+                popt = np.flip(popt)
+
+        if f == 'Constant':
+                popt = y
+
+        return popt
+
+class ModelingFunction:
+
+    @staticmethod
+    def ExponentialCurve(x, a, b, c):
+        return a*np.exp(b*x) + c
+
+    @staticmethod
+    def Line1D(x, a, b):
+        return a*x + b
+
+
 
 
