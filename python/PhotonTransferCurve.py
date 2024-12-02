@@ -183,7 +183,7 @@ class DarkCurrentAnalysis:
         self.Entry2_1_2.grid(column=col+1, row=3)
         WH.UIConfiguration.set_text(self.Entry2_1_2, '1280')
         self.CheckButton2_2 = tkinter.Checkbutton(self.InputinfoFrame, text="", variable=self.OffsetCalibration,
-                                                  command=lambda: WH.UIConfiguration.ButtonState(self.Button3, self.OffsetCalibration.get()))
+                                                  command=lambda: WH.UIConfiguration.ButtonState([self.Button3], self.OffsetCalibration.get()))
         self.CheckButton2_2.select()
         self.CheckButton2_2.grid(column = col, row = 4, columnspan=Entry2Span)
         col = col + Entry2Span

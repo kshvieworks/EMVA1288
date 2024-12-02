@@ -1,3 +1,4 @@
+import re
 import tkinter.filedialog
 
 import imageio
@@ -24,28 +25,34 @@ class Plotting:
         return ax
 
     @staticmethod
-    def ShowImage(imageinfo, ax) -> None:
+    def ShowImage(imageinfo, ax, N = 3) -> None:
         ax.cla()
-        ax.imshow(imageinfo, cmap="gray", vmin=max(0, np.mean(imageinfo) - 3*np.std(imageinfo)), vmax=np.mean(imageinfo) + 3*np.std(imageinfo), origin='lower')
+        ax.imshow(imageinfo, cmap="gray", vmin=max(0, np.mean(imageinfo) - N*np.std(imageinfo)), vmax=np.mean(imageinfo) + N*np.std(imageinfo), origin='lower')
         # ax.imshow(imageinfo, cmap="gray", vmin=35300, vmax=42700, origin='lower')
         plt.pause(0.1)
         plt.ion()
 
     @staticmethod
-    def Show2DPlot(ax, x, y, c='r', label=None, cla = True, xlabel='', ylabel='') -> None:
+    def Show2DPlot(ax, x, y, c='r', label=None, cla = True, xlabel='', ylabel='', axLimSet = True, marker='None') -> None:
         if cla:
             ax.cla()
             ax.set_xlabel(xlabel)
             ax.set_ylabel(ylabel)
+        if axLimSet:
+            ax.set_xlim(x.min(), x.max())
+            ax.set_ylim(y.min(), y.max())
 
         ax.plot(x, y, c=c, alpha=0.7, label=label)
-        ax.set_xlim(x.min(), x.max())
-        ax.set_ylim(y.min(), y.max())
         ax.grid(True)
         ax.legend(loc='best')
         Plotting.forceAspect(ax, 1)
         plt.pause(0.1)
         plt.ion()
+
+    @staticmethod
+    def ShowPoint(ax, x, y, c='r', label=None):
+        ax.scatter(x=x, y=y, c=c, label=label)
+        ax.legend(loc='best')
 
     @staticmethod
     def DrawDivision(ax, imageInfo, numRow, numCol) -> None:
@@ -61,12 +68,13 @@ class Plotting:
             ax.axvline(x=totalCol*(k+1)/numCol, ymin=0, ymax=totalRow-1, color='red')
 
     @staticmethod
-    def ShowDivision_Average(ax, data, x, y):
+    def ShowDivision_Average(ax, data, x, y, text=True):
         # if not np.ma.isMaskedArray(data):
         #     avg = data.sum() / np.count_nonzero(data)
         # else:
         avg = data.mean()
-        ax.text(x, y, int(avg), c='r', horizontalalignment='center', verticalalignment='center')
+        if text:
+            ax.text(x, y, int(avg), c='r', horizontalalignment='center', verticalalignment='center')
         return avg
 
     @staticmethod
@@ -89,11 +97,12 @@ class UIConfiguration:
         df.to_clipboard(excel=True)
 
     @staticmethod
-    def ButtonState(button, condition):
-        if condition == True:
-            button["state"] = 'normal'
-        else:
-            button["state"] = 'disable'
+    def ButtonState(buttons, condition):
+        for button in buttons:
+            if condition == True:
+                button["state"] = 'normal'
+            else:
+                button["state"] = 'disable'
 
 
 class ButtonClickedEvent:
@@ -219,11 +228,15 @@ class ButtonClickedEvent:
         return Data[FOI[0]-1:FOI[1]]
 
     @staticmethod
+    def Set_Columns(Data, Columns):
+        return Data[:, :, [int(s) for s in re.findall(r'\d+', Columns)]]
+
+    @staticmethod
     def Division(ax, imageinfo, numRow, numCol) -> None:
         Plotting.DrawDivision(ax, imageinfo, numRow, numCol)
 
     @staticmethod
-    def Average(ax, imageinfo, numRow, numCol):
+    def Average(ax, imageinfo, numRow, numCol, text=True):
 
         # if not np.ma.isMaskedArray(imageinfo):
         #     totalRow, totalCol = imageinfo.shape[0], imageinfo.shape[1]
@@ -250,7 +263,7 @@ class ButtonClickedEvent:
             for k in range(numCol):
                 Mask = HF.DataProcessing.Division_Mask(imageinfo, Mask, totalRow, numRow, j, totalCol, numCol, k)
                 MaskedImage = np.ma.masked_array(imageinfo, mask = ~Mask)
-                avg[j*numCol +k] = Plotting.ShowDivision_Average(ax, MaskedImage, int(totalRow*(j+0.5)/numRow), int(totalCol*(k+0.5)/numCol))
+                avg[j*numCol +k] = Plotting.ShowDivision_Average(ax, MaskedImage, int(totalRow*(j+0.5)/numRow), int(totalCol*(k+0.5)/numCol), text)
 
         return avg
 
@@ -369,3 +382,28 @@ class ButtonClickedEvent:
                 imageInfo[nG*j:nG*(j+1), nD*k:nD*(k+1)] = HF.DataProcessing.LineCalibration(tempData)
 
         return imageInfo
+
+    @staticmethod
+    def FindMinimumValues(imageInfo, n):
+        flattenImage = HF.DataProcessing.FlattenArray(imageInfo)
+        return HF.DataProcessing.FindMinimumValues(flattenImage, n)
+
+    @staticmethod
+    def LPF_1stOrder(data, tau, dt):
+
+        v0 = data.copy()
+        for k, vi in enumerate(data[1:]):
+            v0[k + 1] = HF.DataProcessing.LowPassFilter_1stOrder(vi, v0[k], tau, dt)
+
+        return v0
+
+    @staticmethod
+    def Fit_Exponential(x, y):
+        calX = x.copy()
+        calX = calX - calX[0]
+
+        popt = HF.DataProcessing.CurveFit('Exponential', calX, y, [y[0] - y[-1], -0.3, y[-1]], maxfev = 10000)
+        fit_data = HF.ModelingFunction.ExponentialCurve(calX, *popt)
+        R2 = HF.DataProcessing.RSquared(calX, y, fit_data)
+
+        return popt, R2, fit_data

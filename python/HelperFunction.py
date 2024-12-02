@@ -42,6 +42,18 @@ class DataProcessing:
         return np.diff(data, axis=0)
 
     @staticmethod
+    def GlueFrame_Vertical(data):
+        return np.vstack((data[:]))
+
+    @staticmethod
+    def GlueFrame_Horizontal(data):
+        return np.hstack((data[:]))
+
+    @staticmethod
+    def Binning_Horizontal(data):
+        return data.mean(axis=1)
+
+    @staticmethod
     def TemporalNoise(data, Differential = True):
         return np.std(data, axis=0) / np.sqrt(2) if Differential else np.std(data, axis=0)
 
@@ -67,6 +79,14 @@ class DataProcessing:
     @staticmethod
     def Array2Maskedarray(imageinfo):
         return np.ma.masked_array(imageinfo, mask = False)
+
+    @staticmethod
+    def FlattenArray(imageinfo):
+        return np.ravel(imageinfo)
+
+    @staticmethod
+    def FindMinimumValues(flattenimage, n):
+        return flattenimage[flattenimage.argsort()[:n]]
 
     @staticmethod
     def IQR_Mask(imageinfo, MaskedArray, NIQR):
@@ -158,6 +178,11 @@ class DataProcessing:
             return data[:, U:D, L:R]
 
     @staticmethod
+    def LowPassFilter_1stOrder(vi, vo_prev, tau, dt):
+
+        return ((dt*vi) + (tau*vo_prev)) / (dt + tau)
+
+    @staticmethod
     def LineMean(data, Orientation):
         return np.mean(data, axis=data.ndim-1) if Orientation == 'Row' else np.mean(data, axis=data.ndim-2)
     @staticmethod
@@ -190,6 +215,16 @@ class DataProcessing:
                 popt = y
 
         return popt
+
+    @staticmethod
+    def RSquared(x, y, fit_data):
+
+        yhat = fit_data
+        ybar = np.sum(y) / len(y)
+        sse = np.sum((yhat - ybar)**2)
+        sst = np.sum((y - ybar)**2)
+
+        return sse/sst
 
 class ModelingFunction:
 

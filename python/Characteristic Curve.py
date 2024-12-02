@@ -18,7 +18,7 @@ fsPTC = (fw/200, fh/100)
 class DarkCurrentAnalysis:
     def __init__(self, window):
         self.window = window
-        self.window.title("Frame Averaging and Signal Mean")
+        self.window.title("Characteristic Curve Pre Processing")
         # self.window.config(background='#FFFFFF')
         self.window.geometry(f"{fw+350}x{int(2*fh/3)+100}")
         self.window.resizable(True, True)
@@ -37,7 +37,6 @@ class DarkCurrentAnalysis:
         self.Average = 0
 
         self.Division_Column, self.Division_Row = IntVar(), IntVar()
-        self.NIQR, self.NIteration, self.ExcludingZero = DoubleVar(), IntVar(), BooleanVar()
 
         self.Output = FALSE
 
@@ -72,10 +71,10 @@ class DarkCurrentAnalysis:
 
         Image_Size = [int(self.ImageSize_Row.get()), int(self.ImageSize_Col.get())]
 
-        fpath = WH.ButtonClickedEvent.Open_Path(self.filepath)
+        fpath = WH.ButtonClickedEvent.Open_File(self.filepath)
         self.Label3.configure(text=f"{fpath[-40:]}")
 
-        self.dark_data = WH.ButtonClickedEvent.Read_Folder(fpath, self.filepath[-3:], np.uint16, Image_Size)
+        self.dark_data = WH.ButtonClickedEvent.Read_File(fpath, fpath[-3:], np.uint16, Image_Size)
         self.InputData = self.InputData - self.dark_data
         self.frame_average = HF.DataProcessing.TemporalAverage(self.InputData)
         WH.Plotting.ShowImage(self.frame_average, self.ImageWidget)
@@ -86,14 +85,14 @@ class DarkCurrentAnalysis:
         ROI1 = np.array([int(self.ROI_Left.get()), int(self.ROI_Dn.get())])
         ROI2 = np.array([int(self.ROI_Right.get()), int(self.ROI_Up.get())])
 
-        Frame = HF.DataProcessing.TemporalAverage(WH.ButtonClickedEvent.Set_FOI(Frame, FOI))
-        self.ROI_Data = WH.ButtonClickedEvent.Set_ROI(Frame, ROI1, ROI2)
+        Frame = WH.ButtonClickedEvent.Set_ROI(Frame, ROI1, ROI2)
+        Frame = WH.ButtonClickedEvent.Set_FOI(Frame, FOI)
+        self.ROI_Data = Frame
 
         if not hasattr(self, 'ROIWidget'):
             self.ROIWidget = WH.Plotting.MakeFigureWidget(self.ROIPlotFrame, fs)
 
-        WH.Plotting.ShowImage(Frame, self.ImageWidget)
-        WH.Plotting.ShowImage(self.ROI_Data, self.ROIWidget)
+        WH.Plotting.ShowImage(HF.DataProcessing.TemporalAverage(self.ROI_Data), self.ROIWidget)
 
     def ShowBlock(self, ax, Frame, row, col):
 
@@ -106,24 +105,15 @@ class DarkCurrentAnalysis:
 
         self.Label8_2_1.configure(text=f"{np.format_float_scientific(np.mean(Frame), unique=False, precision=2)}")
         self.Label8_2_2.configure(text=f"{np.format_float_scientific(np.std(Frame), unique=False, precision=2)}")
-        self.Output = self.Average[:, np.newaxis]
-
-    def Apply_IQR(self, ax, Frame, row, col, NIQR, NIteration, ExcZero):
-        Frame = HF.DataProcessing.Array2Maskedarray(Frame)
-        IQR_Frame = WH.ButtonClickedEvent.IQR(Frame, NIQR, NIteration, ExcZero)
-
-        WH.Plotting.ShowImage(IQR_Frame, ax)
-        WH.Plotting.DrawDivision(ax, IQR_Frame, row, col)
-        Average = WH.ButtonClickedEvent.Average(ax, IQR_Frame, row, col)
-        self.Output = np.append(self.Output, Average[:, np.newaxis].copy(), axis=1)
-
+        self.Output = self.Average.copy()
 
     def SaveBTNEvent(self, data):
 
         WH.ButtonClickedEvent.Save_csv(self.filepath, data)
 
     def SaveClipboardBTNEvent(self, data):
-        WH.UIConfiguration.Save2Clipboard(data)
+
+        WH.ButtonClickedEvent.SaveClipboard(data)
 
     def __main__(self):
 
@@ -160,7 +150,7 @@ class DarkCurrentAnalysis:
         self.Entry2_1_2.grid(column=col+1, row=3)
         WH.UIConfiguration.set_text(self.Entry2_1_2, '1280')
         self.CheckButton2_2 = tkinter.Checkbutton(self.InputinfoFrame, text="", variable=self.OffsetCalibration,
-                                                  command=lambda: WH.UIConfiguration.ButtonState([self.Button3], self.OffsetCalibration.get()))
+                                                  command=lambda: WH.UIConfiguration.ButtonState(self.Button3, self.OffsetCalibration.get()))
         self.CheckButton2_2.select()
         self.CheckButton2_2.grid(column = col, row = 4, columnspan=Entry2Span)
         col = col + Entry2Span
@@ -264,39 +254,15 @@ class DarkCurrentAnalysis:
         self.Label8_2_2.grid(column=col+1, row=4)
         col = col + Entry8Span
 
-        Entry9Span = 2
-        self.Button9 = tkinter.Button(self.InputinfoFrame, text='Spatial IQR',
-                                      command=lambda: self.Apply_IQR(self.ROIWidget,
-                                                                     self.ROI_Data.copy(),
-                                                                     int(self.Division_Row.get()),
-                                                                     int(self.Division_Column.get()),
-                                                                     self.NIQR.get(),
-                                                                     self.NIteration.get(),
-                                                                     self.ExcludingZero.get()))
-
-        self.Button9.grid(column=col, row=2, columnspan=Entry9Span)
-        self.Label9_1_1 = tkinter.Label(self.InputinfoFrame, text='IQR')
-        self.Label9_1_1.grid(column=col, row=3)
-        self.Label9_2_1 = tkinter.Label(self.InputinfoFrame, text='Iterations')
-        self.Label9_2_1.grid(column=col, row=4)
-        self.Label9_3_1 = tkinter.Label(self.InputinfoFrame, text='Excluding 0')
-        self.Label9_3_1.grid(column=col, row=5)
-
-        self.Entry9_1_2 = tkinter.Entry(self.InputinfoFrame, width=4, textvariable=self.NIQR, relief="ridge")
-        self.Entry9_1_2.grid(column=col + 1, row=3)
-        self.Entry9_2_2 = tkinter.Entry(self.InputinfoFrame, width=4, textvariable=self.NIteration, relief="ridge")
-        self.Entry9_2_2.grid(column=col + 1, row=4)
-        self.CheckButton9_3_2 = tkinter.Checkbutton(self.InputinfoFrame, text="", variable=self.ExcludingZero)
-        self.CheckButton9_3_2.grid(column = col + 1, row = 5)
-
+        Entry9Span = 1
+        self.Button9 = tkinter.Button(self.InputinfoFrame, text='Save Image', command=lambda: self.SaveBTNEvent(self.Output))
+        self.Button9.grid(column=col, row=2, columnspan=Entry8Span)
+        self.Button9_2 = tkinter.Button(self.InputinfoFrame, text='Save Clipboard', command=lambda: self.SaveClipboardBTNEvent(self.Output))
+        self.Button9_2.grid(column=col, row=3)
         col = col + Entry9Span
 
-        Entry10Span = 1
-        self.Button10 = tkinter.Button(self.InputinfoFrame, text='Save Image', command=lambda: self.SaveBTNEvent(self.Output))
-        self.Button10.grid(column=col, row=2, columnspan=Entry8Span)
-        self.Button10_2 = tkinter.Button(self.InputinfoFrame, text='Save Clipboard', command=lambda: self.SaveClipboardBTNEvent(self.Output))
-        self.Button10_2.grid(column=col, row=3)
-        col = col + Entry10Span
+        # Entry10Span = 1
+        # col = col + Entry10Span
 
 
 if __name__ == '__main__':

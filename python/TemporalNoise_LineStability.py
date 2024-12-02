@@ -250,7 +250,7 @@ class DarkCurrentAnalysis:
         self.Entry2_1_2.grid(column=col+1, row=3)
         WH.UIConfiguration.set_text(self.Entry2_1_2, '1280')
         self.CheckButton2_2 = tkinter.Checkbutton(self.InputinfoFrame, text="", variable=self.OffsetCalibration,
-                                                  command=lambda: WH.UIConfiguration.ButtonState(self.Button3, self.OffsetCalibration.get()))
+                                                  command=lambda: WH.UIConfiguration.ButtonState([self.Button3], self.OffsetCalibration.get()))
         self.CheckButton2_2.select()
         self.CheckButton2_2.grid(column = col, row = 4, columnspan=Entry2Span)
         col = col + Entry2Span
@@ -339,7 +339,7 @@ class DarkCurrentAnalysis:
         self.Button7 = tkinter.Button(self.InputinfoFrame, text='Division',
                                       command=lambda: self.ShowBlock(self.ImageWidget, self.ROI_Data.copy(), int(self.Division_Row.get()), int(self.Division_Column.get())))
         self.Button7.grid(column=col, row=2, columnspan=Entry7Span)
-        WH.UIConfiguration.ButtonState(self.Button7, False)
+        WH.UIConfiguration.ButtonState([self.Button7], False)
         WH.UIConfiguration.set_text(self.Entry7_1_2, '1')
         WH.UIConfiguration.set_text(self.Entry7_2_2, '1')
         self.Entry7_1_2.configure(state='readonly')
